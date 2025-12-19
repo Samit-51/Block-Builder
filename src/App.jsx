@@ -90,8 +90,9 @@ export default function PixelBlockBuilderV2() {
     setTerminalLines(prev => [...prev, line]);
   };
 
-  const executeBlockAction = async (block) => {
-    setSystemState(prev => ({ ...prev, currentBlock: block.type }));
+  const executeBlockAction = async (block, currentSystemState) => {
+    // Use the passed state instead of the stale state
+    const state = currentSystemState || systemState;
     
     switch (block.type) {
       case 'login':
@@ -116,44 +117,44 @@ export default function PixelBlockBuilderV2() {
         });
 
       case 'dashboard':
-        if (!systemState.isLoggedIn) {
+        if (!state.isLoggedIn) {
           addTerminalLine(`> ERROR: Not logged in. Access denied.`);
           return 'error';
         }
-        addTerminalLine(`> DASHBOARD: Welcome ${systemState.currentUser}!`);
-        addTerminalLine(`> Your permissions: ${systemState.users[systemState.currentUser]?.permissions.join(', ')}`);
+        addTerminalLine(`> DASHBOARD: Welcome ${state.currentUser}!`);
+        addTerminalLine(`> Your permissions: ${state.users[state.currentUser]?.permissions.join(', ')}`);
         addTerminalLine(`> Type "files" to see your files`);
         await new Promise(resolve => setTimeout(resolve, 1500));
         return 'success';
 
       case 'permission':
-        if (!systemState.isLoggedIn) {
+        if (!state.isLoggedIn) {
           addTerminalLine(`> ERROR: Not logged in`);
           return 'error';
         }
-        const perms = systemState.users[systemState.currentUser]?.permissions || [];
+        const perms = state.users[state.currentUser]?.permissions || [];
         addTerminalLine(`> PERMISSION CHECK: ${perms.join(', ')}`);
         await new Promise(resolve => setTimeout(resolve, 1500));
         return 'success';
 
       case 'users':
-        if (!systemState.isLoggedIn) {
+        if (!state.isLoggedIn) {
           addTerminalLine(`> ERROR: Not logged in`);
           return 'error';
         }
         addTerminalLine(`> USER LIST:`);
-        Object.keys(systemState.users).forEach(user => {
-          addTerminalLine(`>   - ${user} (${systemState.users[user].permissions.length} permissions)`);
+        Object.keys(state.users).forEach(user => {
+          addTerminalLine(`>   - ${user} (${state.users[user].permissions.length} permissions)`);
         });
         await new Promise(resolve => setTimeout(resolve, 1500));
         return 'success';
 
       case 'createfile':
-        if (!systemState.isLoggedIn) {
+        if (!state.isLoggedIn) {
           addTerminalLine(`> ERROR: Not logged in`);
           return 'error';
         }
-        const canCreate = systemState.users[systemState.currentUser]?.permissions.includes('create');
+        const canCreate = state.users[state.currentUser]?.permissions.includes('create');
         if (!canCreate) {
           addTerminalLine(`> ERROR: No 'create' permission`);
           return 'error';
@@ -167,11 +168,11 @@ export default function PixelBlockBuilderV2() {
         });
 
       case 'editfile':
-        if (!systemState.isLoggedIn) {
+        if (!state.isLoggedIn) {
           addTerminalLine(`> ERROR: Not logged in`);
           return 'error';
         }
-        const canEdit = systemState.users[systemState.currentUser]?.permissions.includes('write');
+        const canEdit = state.users[state.currentUser]?.permissions.includes('write');
         if (!canEdit) {
           addTerminalLine(`> ERROR: No 'write' permission`);
           return 'error';
@@ -185,11 +186,11 @@ export default function PixelBlockBuilderV2() {
         });
 
       case 'deletefile':
-        if (!systemState.isLoggedIn) {
+        if (!state.isLoggedIn) {
           addTerminalLine(`> ERROR: Not logged in`);
           return 'error';
         }
-        const canDelete = systemState.users[systemState.currentUser]?.permissions.includes('delete');
+        const canDelete = state.users[state.currentUser]?.permissions.includes('delete');
         if (!canDelete) {
           addTerminalLine(`> ERROR: No 'delete' permission`);
           return 'error';
@@ -204,7 +205,7 @@ export default function PixelBlockBuilderV2() {
 
       case 'database':
         addTerminalLine(`> DATABASE: Saving to database...`);
-        addTerminalLine(`> Files stored: ${Object.keys(systemState.files).length}`);
+        addTerminalLine(`> Files stored: ${Object.keys(state.files).length}`);
         await new Promise(resolve => setTimeout(resolve, 1500));
         return 'success';
 
@@ -214,9 +215,11 @@ export default function PixelBlockBuilderV2() {
         return 'success';
 
       case 'if':
-        addTerminalLine(`> CONDITIONAL: Evaluating condition...`);
+        // IF block doesn't execute logic itself - it just passes through
+        // The actual branching happens in simulateFlow based on previous result
+        addTerminalLine(`> CONDITIONAL: Evaluating previous result...`);
         await new Promise(resolve => setTimeout(resolve, 1000));
-        return Math.random() > 0.5 ? 'true' : 'false';
+        return 'conditional'; // Special marker
 
       default:
         return 'success';
@@ -232,16 +235,17 @@ export default function PixelBlockBuilderV2() {
         const user = systemState.users[username];
         
         if (user && user.password === password) {
-          setSystemState(prev => ({
-            ...prev,
+          const newState = {
+            ...systemState,
             currentUser: username,
             isLoggedIn: true
-          }));
+          };
+          setSystemState(newState);
           addTerminalLine(`> ✓ Login successful! Welcome ${username}`);
           setAwaitingInput(null);
           setSimulationPaused(false);
           if (simulationResolveRef.current) {
-            simulationResolveRef.current('success');
+            simulationResolveRef.current({ result: 'success', newState });
             simulationResolveRef.current = null;
           }
         } else {
@@ -262,19 +266,20 @@ export default function PixelBlockBuilderV2() {
           addTerminalLine(`> ✗ Registration failed: Username already exists`);
           addTerminalLine(`> Try again with different username`);
         } else {
-          setSystemState(prev => ({
-            ...prev,
+          const newState = {
+            ...systemState,
             users: {
-              ...prev.users,
+              ...systemState.users,
               [username]: { password, permissions: ['read'] }
             }
-          }));
+          };
+          setSystemState(newState);
           addTerminalLine(`> ✓ Registration successful! User ${username} created`);
           addTerminalLine(`> Default permissions: read`);
           setAwaitingInput(null);
           setSimulationPaused(false);
           if (simulationResolveRef.current) {
-            simulationResolveRef.current('success');
+            simulationResolveRef.current({ result: 'success', newState });
             simulationResolveRef.current = null;
           }
         }
@@ -287,18 +292,19 @@ export default function PixelBlockBuilderV2() {
     if (awaitingInput === 'createfile') {
       if (command === 'create' && args.length >= 1) {
         const filename = args[0];
-        setSystemState(prev => ({
-          ...prev,
+        const newState = {
+          ...systemState,
           files: {
-            ...prev.files,
-            [filename]: { content: '', owner: prev.currentUser, created: new Date().toISOString() }
+            ...systemState.files,
+            [filename]: { content: '', owner: systemState.currentUser, created: new Date().toISOString() }
           }
-        }));
+        };
+        setSystemState(newState);
         addTerminalLine(`> ✓ File '${filename}' created successfully`);
         setAwaitingInput(null);
         setSimulationPaused(false);
         if (simulationResolveRef.current) {
-          simulationResolveRef.current('success');
+          simulationResolveRef.current({ result: 'success', newState });
           simulationResolveRef.current = null;
         }
       } else {
@@ -316,18 +322,19 @@ export default function PixelBlockBuilderV2() {
           addTerminalLine(`> ✗ File '${filename}' not found`);
           addTerminalLine(`> Try again with existing filename`);
         } else {
-          setSystemState(prev => ({
-            ...prev,
+          const newState = {
+            ...systemState,
             files: {
-              ...prev.files,
-              [filename]: { ...prev.files[filename], content }
+              ...systemState.files,
+              [filename]: { ...systemState.files[filename], content }
             }
-          }));
+          };
+          setSystemState(newState);
           addTerminalLine(`> ✓ File '${filename}' updated successfully`);
           setAwaitingInput(null);
           setSimulationPaused(false);
           if (simulationResolveRef.current) {
-            simulationResolveRef.current('success');
+            simulationResolveRef.current({ result: 'success', newState });
             simulationResolveRef.current = null;
           }
         }
@@ -345,16 +352,15 @@ export default function PixelBlockBuilderV2() {
           addTerminalLine(`> ✗ File '${filename}' not found`);
           addTerminalLine(`> Try again with existing filename`);
         } else {
-          setSystemState(prev => {
-            const newFiles = { ...prev.files };
-            delete newFiles[filename];
-            return { ...prev, files: newFiles };
-          });
+          const newFiles = { ...systemState.files };
+          delete newFiles[filename];
+          const newState = { ...systemState, files: newFiles };
+          setSystemState(newState);
           addTerminalLine(`> ✓ File '${filename}' deleted successfully`);
           setAwaitingInput(null);
           setSimulationPaused(false);
           if (simulationResolveRef.current) {
-            simulationResolveRef.current('success');
+            simulationResolveRef.current({ result: 'success', newState });
             simulationResolveRef.current = null;
           }
         }
@@ -463,9 +469,10 @@ export default function PixelBlockBuilderV2() {
     await simulateFlow(startBlock.id, []);
   };
 
-  const simulateFlow = async (blockId, visited) => {
-    if (!isSimulating) return;
-
+  const simulateFlow = async (blockId, visited, currentState = null, previousResult = 'success') => {
+    // Use passed state or fall back to systemState
+    const state = currentState || systemState;
+    
     if (visited.includes(blockId)) {
       addTerminalLine('> Loop detected - ending simulation');
       setIsSimulating(false);
@@ -484,22 +491,41 @@ export default function PixelBlockBuilderV2() {
 
     setCurrentSimulationBlock(blockId);
     setSimulationPath([...visited, blockId]);
-    addTerminalLine(`> ▶ Executing: ${block.label}`);
 
-    const result = await executeBlockAction(block);
+    const actionResult = await executeBlockAction(block, state);
+    
+    // Extract result and updated state
+    let result, updatedState;
+    if (typeof actionResult === 'object' && actionResult.result) {
+      result = actionResult.result;
+      updatedState = actionResult.newState;
+    } else {
+      result = actionResult;
+      updatedState = state;
+    }
 
-    if (result === 'error') {
-      addTerminalLine(`> Simulation ended due to error`);
+    const nextConnections = connections.filter(c => c.from === blockId);
+
+    if (nextConnections.length === 0) {
+      if (result === 'error') {
+        addTerminalLine(`> Simulation ended with error at: ${block.label}`);
+      } else {
+        addTerminalLine(`> Simulation complete at: ${block.label}`);
+      }
+      addTerminalLine('> ═══════════════════════════════════');
       setIsSimulating(false);
       setCurrentSimulationBlock(null);
       setSimulationPath([]);
       return;
     }
 
-    const nextConnections = connections.filter(c => c.from === blockId);
+    const nextBlock = blocks.find(b => b.id === nextConnections[0]?.to);
+    const isNextBlockConditional = nextBlock?.special === 'conditional';
 
-    if (nextConnections.length === 0) {
-      addTerminalLine(`> Simulation complete at: ${block.label}`);
+    // If error occurred and next block is NOT a conditional, stop simulation
+    if (result === 'error' && !isNextBlockConditional) {
+      addTerminalLine(`> ✗ Error occurred - simulation stopped`);
+      addTerminalLine(`> Tip: Connect to IF/THEN block to handle errors`);
       addTerminalLine('> ═══════════════════════════════════');
       setIsSimulating(false);
       setCurrentSimulationBlock(null);
@@ -511,21 +537,24 @@ export default function PixelBlockBuilderV2() {
       const trueConnection = nextConnections.find(c => c.pathType === 'true');
       const falseConnection = nextConnections.find(c => c.pathType === 'false');
 
-      if (result === 'true' && trueConnection) {
-        addTerminalLine(`> ✓ Condition: TRUE path taken`);
-        await simulateFlow(trueConnection.to, [...visited, blockId]);
-      } else if (result === 'false' && falseConnection) {
-        addTerminalLine(`> ✗ Condition: FALSE path taken`);
-        await simulateFlow(falseConnection.to, [...visited, blockId]);
+      const shouldTakeTrue = previousResult === 'success';
+
+      if (shouldTakeTrue && trueConnection) {
+        addTerminalLine(`> ✓ Previous result: SUCCESS → Taking TRUE path`);
+        await simulateFlow(trueConnection.to, [...visited, blockId], updatedState, 'success');
+      } else if (!shouldTakeTrue && falseConnection) {
+        addTerminalLine(`> ✗ Previous result: ERROR/FAILURE → Taking FALSE path`);
+        await simulateFlow(falseConnection.to, [...visited, blockId], updatedState, previousResult);
       } else {
-        addTerminalLine(`> Missing ${result.toUpperCase()} path - ending simulation`);
+        addTerminalLine(`> Missing ${shouldTakeTrue ? 'TRUE' : 'FALSE'} path - ending simulation`);
         setIsSimulating(false);
         setCurrentSimulationBlock(null);
         setSimulationPath([]);
       }
     } else {
       const nextConnection = nextConnections[0];
-      await simulateFlow(nextConnection.to, [...visited, blockId]);
+      addTerminalLine(`> → Passing result "${result}" to next block`);
+      await simulateFlow(nextConnection.to, [...visited, blockId], updatedState, result);
     }
   };
 
@@ -544,6 +573,7 @@ export default function PixelBlockBuilderV2() {
     }
   };
 
+  // [Rest of the UI code remains the same as v1...]
   const handleMenuMouseDown = (e, item) => {
     const rect = e.currentTarget.getBoundingClientRect();
     const newBlock = {
